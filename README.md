@@ -1,575 +1,230 @@
-# SMART-MARITIME-VESSEL-TRAFFIC---PORT-INTELLIGENCE-PLATFORM
+# Smart Maritime Analytics Platform
 
-# 🚢 Smart Maritime Vessel Traffic & Port Intelligence Platform
+A Big Data pipeline that takes ship position signals (AIS), processes them with Kafka and Spark, stores them in HDFS and PostGIS, and shows the results on Superset dashboards. It also uses Spark MLlib to group vessels by behavior and flag the ones that look unusual.
 
-A distributed, real-time Big Data and AI-driven architecture designed to ingest, process, store, analyze, and visualize global maritime AIS (Automatic Identification System) vessel telemetry and port congestion analytics.
+Graduation project, NTI Big Data, 2026.
+
+## 🎥 Demo Video
+
+▶️ **[Watch the full project demo](https://drive.google.com/file/d/13VWCCYNCjUme78On0m5TT6-d7JqVPhTI/view?usp=sharing)**
 
 ## 🛠️ Technologies Used
 
-![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-000000?style=for-the-badge\&logo=apachekafka\&logoColor=white)
-![PySpark](https://img.shields.io/badge/PySpark-E25A1C?style=for-the-badge\&logo=apachespark\&logoColor=white)
-![Spark MLlib](https://img.shields.io/badge/Spark%20MLlib-E25A1C?style=for-the-badge\&logo=apachespark\&logoColor=white)
-![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-017CEE?style=for-the-badge\&logo=apacheairflow\&logoColor=white)
-![Apache Superset](https://img.shields.io/badge/Apache%20Superset-20A7C9?style=for-the-badge\&logo=apache\&logoColor=white)
-![Hadoop HDFS](https://img.shields.io/badge/Hadoop%20HDFS-66CCFF?style=for-the-badge\&logo=apachehadoop\&logoColor=black)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge\&logo=postgresql\&logoColor=white)
-![PostGIS](https://img.shields.io/badge/PostGIS-4169E1?style=for-the-badge\&logo=postgresql\&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge\&logo=python\&logoColor=white)
-![SQL](https://img.shields.io/badge/SQL-4479A1?style=for-the-badge\&logo=databricks\&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge\&logo=docker\&logoColor=white)
+![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-231F20?style=for-the-badge&logo=apachekafka&logoColor=white)
+![PySpark](https://img.shields.io/badge/PySpark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)
+![Spark MLlib](https://img.shields.io/badge/Spark%20MLlib-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)
+![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-017CEE?style=for-the-badge&logo=apacheairflow&logoColor=white)
+![Apache Superset](https://img.shields.io/badge/Apache%20Superset-20A6C9?style=for-the-badge&logo=apachesuperset&logoColor=white)
+![Hadoop HDFS](https://img.shields.io/badge/Hadoop%20HDFS-66CCFF?style=for-the-badge&logo=apachehadoop&logoColor=black)
+![PostGIS](https://img.shields.io/badge/PostGIS-336791?style=for-the-badge&logo=postgresql&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![SQL](https://img.shields.io/badge/SQL-4479A1?style=for-the-badge)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
----
+## Why ship tracking is a Big Data problem
 
-## 📌 Key Architectural Highlights
+Every large ship carries an AIS radio device that broadcasts its position. The faster a ship moves, the more often it reports, so the data never stops and never slows down.
 
-* **Real Global AIS Telemetry:** High-throughput streaming integration using real AIS data.
-* **Pure Streaming Ingest:** Handles continuous live telemetry through Apache Kafka.
-* **Distributed Processing:** Large-scale stream and batch processing powered by Apache Spark / PySpark.
-* **Distributed Machine Learning:** Vessel behavior clustering and anomaly detection using **Spark MLlib K-Means**.
-* **Spatial Indexing:** Accelerated spatial lookups via PostGIS GIST indexing.
-* **Interactive Dashboards:** Real-time visualization and spatial analytics powered by Apache Superset.
-* **Workflow Orchestration:** Automated batch processing and pipeline monitoring using Apache Airflow.
-* **Containerized Deployment:** Fully orchestrated using Docker Compose.
+| Ship status | How often it reports |
+|---|---|
+| Anchored or docked | every 3 minutes |
+| Sailing slowly (0–14 knots) | every 10 seconds |
+| Sailing at moderate speed (14–23 knots) | every ~6 seconds |
+| Sailing fast and turning | every ~2 seconds |
 
----
+Worldwide that adds up to 100M+ position pings a day, and a busy port or strait can produce around 5,000 messages per second.
 
-## 🏗️ Architecture Overview
+## The data
 
-The platform operates across a 6-layer distributed Big Data pipeline, orchestrated end-to-end using **Apache Airflow**.
+- **Source:** NOAA MarineCadastre historical AIS data
+- **Period:** 7 days, from `AIS_2024_12_25.csv` to `AIS_2024_12_31.csv`
+- **Size:** about 4.77 GB
+- **Rows:** about 45.5 million
+- **How it is used:** all the data comes from these 7 CSV files. No external API is used. A Python producer reads the files and sends the rows into Kafka, and Kafka and Spark take it from there.
 
-### Architecture Flow
+## What it does
 
-**AIS Data Sources**
-↓
-**Python AIS Producer / WebSocket Client**
-↓
-**Apache Kafka**
-↓
-**Apache Spark Structured Streaming**
-↓
-**HDFS + PostgreSQL/PostGIS + Kafka Alerts**
-↓
-**Apache Airflow Batch Processing**
-↓
-**Spark Batch Analytics + Spark MLlib K-Means**
-↓
-**PostgreSQL/PostGIS Analytical Tables**
-↓
-**Apache Superset Dashboards**
+| Goal | What it does | Table |
+|---|---|---|
+| Fleet tracking | Shows the latest known position of every ship | `active_fleet_state` |
+| Port dwell time | Detects when a ship enters and leaves a port, and how long it stayed | `port_dwell_times` |
+| Speeding alerts | Flags ships going faster than the limit (20 knots) | `vessel_speed_alerts` |
+| Behavior clustering | Groups ships by how they move and flags unusual ones | `vessel_behavior_clusters` |
 
-### Main Data Flow
+The serving database has 14 tables in total. These four are the ones that matter most; the rest hold reference data and logs.
 
-* **AIS Producer** ingests historical NOAA AIS data and live AIS telemetry.
-* **Apache Kafka** receives and distributes raw AIS position messages.
-* **Spark Structured Streaming** processes incoming telemetry, performs validation, deduplication, and streaming analytics.
-* Processed data is stored in **HDFS** as Parquet files for historical analysis.
-* Current vessel state and operational analytics are stored in **PostgreSQL/PostGIS**.
-* Speed alerts and other streaming events are published to dedicated **Kafka topics**.
-* **Apache Airflow** orchestrates scheduled batch analytics and Spark jobs.
-* **Spark Batch** calculates port dwell times, fleet speed KPIs, route density, and other operational metrics.
-* **Spark MLlib K-Means** performs vessel behavior clustering and anomaly detection.
-* **Apache Superset** provides dashboards for fleet monitoring, port congestion, vessel behavior, alerts, and spatial analytics.
+## How it works
 
-### 1. Data Sources Layer
+```
+7 NOAA AIS CSV files (Dec 25–31, 2024)
+        ↓
+Python producer
+        ↓
+Apache Kafka  (raw_ais_positions)
+        ↓
+Spark Structured Streaming
+   ├─ PostGIS upsert    current position of each ship
+   ├─ Kafka alerts      speeding events
+   ├─ HDFS Parquet      raw archive, one folder per day
+   └─ HDFS dead-letter  bad or malformed records
+        ↓
+Airflow daily batch (reads the HDFS archive)  →  Spark batch KPIs  +  Spark MLlib K-Means
+        ↓
+PostGIS analytical tables
+        ↓
+Apache Superset dashboards
+```
 
-* **Historical Data (Batch):** NOAA MarineCadastre AIS Historical Archives (5+ GB raw voyage records, port boundaries, vessel track logs).
-* **Real-time Streaming:** Live AIS WebSocket stream via `AISstream.io` (MMSI, Lat/Lon, Speed Over Ground (SOG), Course Over Ground (COG), Heading, Navigation Status).
+The pipeline has two paths that read from the same raw data in HDFS (a Lambda architecture):
 
-### 2. Data Ingestion Layer
+- **Speed path:** fleet tracking and speed alerts. Needs answers in seconds, so it runs on Spark Structured Streaming.
+- **Batch path:** daily KPIs, dwell times and clustering. Needs to be exact, so it reprocesses full days once a day with Spark and Airflow.
 
-* **Python AISStream WebSocket Client:** Ingests live WebSocket feeds.
-* **Apache Kafka (Streaming Platform):** Decouples ingestion into dedicated topics:
+Bad or malformed records are never dropped silently. They go to a dead-letter folder in HDFS so they can be checked later.
 
-  * `raw_ais_positions`
-  * `vessel_speed_alerts`
-  * `port_geofence_events`
-  * `collision_risk_telemetry`
+## ⚡ Loading 45.5M rows: from one CPU core to four
 
-### 3. Processing Layer
+Loading the historical data into Kafka first took **3–4 hours**. Kafka was not the problem. The producer was a single Python process, and because of Python's GIL, CSV parsing, JSON serialization and Kafka sends all ran on one core while the other three sat idle.
 
-* **Apache Spark (Structured Streaming & Batch):** Distributed processing engine handling stream-batch unification.
-* **Spatial & Kinematic Tasks:**
+The fix was one worker process per CSV file. Each worker has its own interpreter, its own GIL and its own Kafka producer, so the work spreads across all cores. It also uses `orjson` for serialization and lighter CSV parsing.
 
-  * PostGIS Polygon Geofencing
-  * Watermarking & Deduplication
-  * 5-min Sliding Acceleration Vectors
-  * Closest Point of Approach (CPA) calculations
+| | Before (single process) | After (multiprocessing) |
+|---|---|---|
+| CPU cores used | 1 of 4 | 4 of 4 |
+| Throughput | ~5,000–7,000 rows/sec | **~28,464 rows/sec** |
+| Load time | 3–4 hours | **under 30 minutes** |
 
-### 4. Storage Layer
+> That is roughly **4–5x more throughput** (topic `raw_ais_positions`, 3 partitions, 1 broker). Nothing changed on the Kafka side. The whole gain came from using cores that were sitting idle.
 
-* **Data Lake (HDFS):** Stores raw JSON payloads, curated datasets, and Parquet files partitioned by `voyage_date` and `port`.
-* **Serving Database (PostgreSQL + PostGIS):**
+## Daily batch pipeline
 
-  * GIST Spatial Indexes on vessel paths.
-  * Active Fleet State Table, Port Congestion Tables, Geofence Boundaries, and Collision-Risk Alert Logs.
+All the data comes from files, so the batch layer is where most of the analysis happens. Once the CSVs are loaded, they sit in HDFS as Parquet, one folder per day (`/raw/ais_historical/date=YYYY-MM-DD/`). Airflow processes one day at a time, so the 7 days of data mean 7 runs of the DAG `maritime_batch_kpi_pipeline`.
 
-### 5. Analytics & AI Layer
+Each run has five tasks, in this order:
 
-* **Machine Learning Engine:** Apache Spark MLlib.
-* **Primary Algorithm:** **K-Means Clustering** for vessel behavior profiling.
-* **Feature Engineering:** `VectorAssembler` and `StandardScaler` from Spark MLlib.
-* **Anomaly Detection:** Euclidean distance from each vessel to its assigned cluster centroid, with cluster-specific percentile thresholds.
-* **Operational Analytics:** Port turnaround efficiency, choke-point congestion metrics, berth utilization trends, and fleet activity patterns.
+| # | Task | What it does | Output |
+|---|---|---|---|
+| 1 | `check_hdfs_partition_exists` | Looks for that day's folder in HDFS and stops the run right away if it is missing | none |
+| 2 | `run_batch_kpi_job` | Spark job that calculates dwell time per port, speed stats per vessel type, traffic density per map cell, and speeding events | `port_dwell_times`, `fleet_daily_kpis`, `route_density_grid`, `vessel_speed_alerts` |
+| 3 | `run_spark_ml_clustering_job` | Groups vessels with K-Means and flags anomalies (details below). The trained model is saved to HDFS | `vessel_behavior_clusters` |
+| 4 | `verify_postgres_rows_written` | Fails the run if no rows were written to `fleet_daily_kpis` for that date | none |
+| 5 | `pipeline_health_check` | Logs the status of Kafka, Spark, HDFS and PostGIS into the task log | task log |
 
-### 6. Visualization Layer
+A few details about the KPI job:
+- A ship counts as being in a port when it is within 3 nautical miles of it (the default radius, it can be changed).
+- Traffic density counts AIS pings inside 0.05° grid cells (also a default), which shows the busiest routes.
+- It can also be run by hand with `spark-submit`, using `--exec-date`, `--port-radius-nm` and `--grid-cell-deg`.
 
-* **Apache Superset:** Interactive BI dashboards, geospatial map overlays, speed/heading time-series, port wait-time KPIs, vessel behavior clusters, and geofence breach alert tables.
+**Safe to re-run.** Old rows for a date are deleted before the new ones are inserted, so running the same day twice never duplicates data. A failed task can simply be retried.
 
----
+**Run it for one date**
 
-## 🧰 Tech Stack & Tools
+```bash
+docker compose exec airflow-scheduler airflow dags trigger -e 2024-12-25 maritime_batch_kpi_pipeline
+```
 
-* **Languages:** Python, SQL
-* **Streaming & Ingestion:** Apache Kafka, WebSockets
-* **Big Data Processing:** Apache Spark, PySpark
-* **Machine Learning:** Spark MLlib, K-Means, VectorAssembler, StandardScaler
-* **Storage & Data Lake:** Hadoop HDFS, PostgreSQL, PostGIS
-* **Orchestration:** Apache Airflow
-* **Visualization:** Apache Superset
-* **Infrastructure:** Docker, Docker Compose
+Repeat with the other dates, up to `2024-12-31`. Follow the runs in the Airflow UI or with:
 
----
+```bash
+docker compose exec airflow-scheduler airflow dags list-runs -d maritime_batch_kpi_pipeline
+```
 
-## ⚡ Workflow Orchestration (Apache Airflow)
+**Check the results**
 
-The platform utilizes Airflow DAGs to coordinate scheduled dependencies and pipeline monitoring:
+```bash
+docker compose exec postgis psql -U maritime -d maritime -c "SELECT kpi_date, count(*) FROM fleet_daily_kpis GROUP BY kpi_date;"
+```
 
-1. **Scheduled Ingest:** Trigger batch processing jobs.
-2. **Spark Spatial Windowing:** Windowed transformations on spatial streams.
-3. **Spark MLlib Model Training:** Periodically train the vessel behavior clustering model using historical AIS data.
-4. **Update PostGIS Spatial Tables:** Push aggregated analytics and ML results to the serving layer.
-5. **Alert Processing:** Process and store collision/geofence/speed alerts.
+This should list one row per processed date. Task logs are saved under `./airflow/logs/`.
 
----
+## Vessel behavior clustering
 
-## 🚀 Quickstart & Deployment
+The only machine learning in the project is Spark MLlib K-Means. It is unsupervised, so it doesn't need labeled data. For each day it:
 
-### 📋 Prerequisites
+1. Builds a feature vector (speed, course, heading, latitude, longitude) and scales it with `StandardScaler`
+2. Trains K-Means with `k = 5`
+3. Measures each vessel's distance to the center of its cluster
+4. Flags a vessel as an anomaly when its distance is above the 95th percentile of its own cluster
 
-* **Docker & Docker Compose**: Docker Engine v24.0+ / Docker Compose v2.20+.
-* **Host Operating System**: Windows with PowerShell 5.1+ / PowerShell 7 (or Linux/macOS with equivalent shell commands).
-* **System Hardware**: Minimum recommended **16 GB RAM** and 4+ CPU cores to comfortably host all services:
+The trained model is saved to HDFS and the results go to `vessel_behavior_clusters` in PostGIS.
 
-  * Spark Standalone Cluster (Master: 1 GB, Worker: 3 GB)
-  * Kafka Broker & KRaft Controller: 1.5 GB
-  * PostGIS Spatial Database: 1 GB
-  * Apache Airflow (Scheduler, Webserver, Postgres): 2 GB
-  * Apache Superset: 2 GB
-  * Hadoop HDFS (NameNode, DataNode): 2 GB
+## 📊 Dashboards
 
----
+### Real-time Fleet Tracking
 
-### ⚡ 1-Click Cluster Bootstrap (`setup_and_run.ps1`)
+Vessel map (refreshes every 30 seconds), active vessel count, and the active vessels roster.
 
-The platform includes an automated startup script `setup_and_run.ps1` for Windows / PowerShell.
+![Real-time Fleet Tracking](Dashboard/Real-time%20Fleet%20Tracking.png)
 
-Run from the project root:
+### Speed Alerts & Safety Violations
+
+Total number of speeding vessels and a log of every event above 20 knots.
+
+![Speed Alerts & Safety Violations](Dashboard/Speed%20Alerts%20%26%20Safety%20Violations.png)
+
+### Port Congestion & Operational Metrics
+
+Dwell time per harbor, plus daily speed and ping metrics by vessel type.
+
+![Port Congestion & Operational Metrics](Dashboard/Port%20Congestion%20%26%20Operational%20Metrics.png)
+
+## 🚀 Getting Started
+
+**You need**
+- Docker Engine 24.0+ and Docker Compose 2.20+
+- Windows PowerShell 5.1+ (or an equivalent shell on Linux/macOS)
+- 16 GB RAM and 4+ CPU cores
+
+**Start everything**
 
 ```powershell
 .\setup_and_run.ps1
 ```
 
-#### What `setup_and_run.ps1` does step by step:
+The script checks Docker, starts the containers, waits for PostGIS and Kafka, takes HDFS out of safe mode, and installs the `pg8000` driver on the Spark nodes.
 
-1. **Docker Engine Health Check**: Runs `docker info` to ensure the Docker daemon is accessible and running.
-2. **Container Launch**: Deploys the complete containerized stack in detached mode using `docker compose up -d`.
-3. **Core Services Health Polling**:
-
-   * Loops up to 30 times (with 2-second intervals) checking PostGIS readiness via `pg_isready -U maritime -d maritime`.
-   * Polls Kafka broker status via `/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092`.
-4. **HDFS SafeMode Bypass**: Automatically disengages HDFS SafeMode (`hdfs dfsadmin -safemode leave`) so HDFS writes are immediately accepted.
-5. **Driver Injection**: Installs the pure-Python `pg8000` database driver into `spark-master` and `spark-worker` (`pip3 install --no-cache-dir pg8000`) ensuring Spark executors can write to PostGIS without native C-library conflicts.
-6. **Active Endpoint Summary**: Outputs web URLs for all active web interfaces:
-
-   * Kafka UI: `http://localhost:8090`
-   * Spark Master UI: `http://localhost:8080`
-   * Spark Worker UI: `http://localhost:8081`
-   * HDFS NameNode UI: `http://localhost:9870`
-   * Apache Airflow: `http://localhost:8082` (`admin` / `admin`)
-   * Apache Superset: `http://localhost:8089` (`admin` / `admin`)
-   * Jupyter Lab: `http://localhost:8888` (token: `lab`)
-
----
-
-## ⚙️ Batch Analytics & Orchestration (Phase 2)
-
-### 1. Manual Batch KPI Spark Job Execution
-
-You can manually trigger the batch analytical processor outside Airflow for any date partition present in HDFS:
+**Load the Superset dashboards**
 
 ```bash
-docker compose exec spark-master /spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0,org.postgresql:postgresql:42.6.0 \
-  --conf spark.sql.shuffle.partitions=8 \
-  --conf spark.executor.memory=2g \
-  --conf spark.driver.memory=1g \
-  /opt/spark-apps/batch_port_kpi_processor.py --exec-date 2024-12-25
+docker compose exec superset python3 /tmp/setup_superset.py
 ```
 
-Optional CLI parameters:
+**Run the daily pipeline**
 
-* `--exec-date YYYY-MM-DD`: Target HDFS partition date (defaults to yesterday).
-* `--port-radius-nm 3.0`: Port catchment radius in nautical miles (default: 3.0).
-* `--grid-cell-deg 0.05`: Spatial route density grid cell resolution in degrees (default: 0.05).
+See [Daily batch pipeline](#daily-batch-pipeline) above for how to run it for each date.
 
-### 2. Airflow Orchestration DAG (`maritime_batch_kpi_pipeline`)
+**Where to find things**
 
-The DAG coordinates daily batch processing across four sequential tasks:
+| Service | URL | Login |
+|---|---|---|
+| Superset | http://localhost:8089 | admin / admin |
+| Airflow | http://localhost:8082 | admin / admin |
+| Kafka UI | http://localhost:8090 | none |
+| Spark Master | http://localhost:8080 | none |
+| HDFS NameNode | http://localhost:9870 | none |
+| Jupyter Lab | http://localhost:8888 | token: `lab` |
 
-1. `check_hdfs_partition_exists`: Verifies `hdfs://namenode:9000/raw/ais_historical/date={{ ds }}` exists before triggering Spark; fails fast if missing.
-2. `run_batch_kpi_job`: Submits `batch_port_kpi_processor.py` for the execution date.
-3. `verify_postgres_rows_written`: Asserts rows landed in `fleet_daily_kpis` for `{{ ds }}` using PostGIS connection; raises `AirflowFailException` if zero rows found.
-4. `pipeline_health_check`: Logs structured diagnostics for Kafka, Spark, HDFS, and PostGIS directly into task logs.
+## 🔍 Try a query
 
-#### Triggering the Pipeline:
+Top 5 busiest ports by number of visits:
 
 ```bash
-# Trigger execution for a specific date partition
-docker compose exec airflow-scheduler airflow dags trigger -e 2024-12-25 maritime_batch_kpi_pipeline
-
-# Check execution run status
-docker compose exec airflow-scheduler airflow dags list-runs -d maritime_batch_kpi_pipeline
-
-# Check individual task states for the run
-docker compose exec airflow-scheduler airflow tasks states-for-dag-run maritime_batch_kpi_pipeline <run_id>
-```
-
-#### DAG Logs:
-
-Task logs are persisted to the mounted volume at:
-
-`./airflow/logs/dag_id=maritime_batch_kpi_pipeline/run_id=<run_id>/task_id=<task_id>/`
-
----
-
-## 🔍 Verification & Demo SQL Queries
-
-### Verification Commands
-
-```bash
-# 1. Check container health
-docker compose ps
-
-# 2. Check archived partitions in HDFS
-docker compose exec namenode hdfs dfs -ls /raw/ais_historical/
-
-# 3. Confirm rows landed in analytical tables
-docker compose exec postgis psql -U maritime -d maritime -c "SELECT kpi_date, count(*) FROM fleet_daily_kpis GROUP BY kpi_date;"
-docker compose exec postgis psql -U maritime -d maritime -c "SELECT kpi_date, count(*) FROM port_dwell_times GROUP BY kpi_date;"
-docker compose exec postgis psql -U maritime -d maritime -c "SELECT kpi_date, count(*) FROM route_density_grid GROUP BY kpi_date;"
-docker compose exec postgis psql -U maritime -d maritime -c "SELECT DATE(detected_at), count(*) FROM vessel_speed_alerts GROUP BY DATE(detected_at);"
-```
-
-### Demo Analytical Queries
-
-#### Query 1: Top 5 Busiest Ports by Dwell Time
-
-```sql
 docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    port_id,
-    COUNT(*) AS total_visits,
-    ROUND(AVG(dwell_minutes), 1) AS avg_dwell_minutes,
-    ROUND(MAX(dwell_minutes), 1) AS max_dwell_minutes
+SELECT port_id,
+       COUNT(*) AS total_visits,
+       ROUND(AVG(dwell_minutes), 1) AS avg_dwell_minutes
 FROM port_dwell_times
 WHERE kpi_date = '2024-12-25'
 GROUP BY port_id
 ORDER BY total_visits DESC
-LIMIT 5;
-"
+LIMIT 5;"
 ```
 
-#### Query 2: Fleet Speed Profiles & Activity by Vessel Type
-
-```sql
-docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    vessel_type,
-    avg_sog AS avg_speed_kts,
-    max_sog AS max_speed_kts,
-    ping_count AS total_pings
-FROM fleet_daily_kpis
-WHERE kpi_date = '2024-12-25'
-ORDER BY ping_count DESC
-LIMIT 5;
-"
-```
-
-#### Query 3: Top Traffic Hotspots (Route Density Grid)
-
-```sql
-docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    grid_lat,
-    grid_lon,
-    ping_count AS density_pings
-FROM route_density_grid
-WHERE kpi_date = '2024-12-25'
-ORDER BY ping_count DESC
-LIMIT 5;
-"
-```
-
----
-
-## 📊 Apache Superset Dashboards
-
-### Accessing Superset
-
-* **URL**: `http://localhost:8089`
-* **Username**: `admin`
-* **Password**: `admin`
-
-### Automated Provisioning
-
-The dashboards, datasets, and database connections can be automatically provisioned by executing:
-
-```bash
-# From Windows PowerShell / Bash
-docker compose exec superset python3 /tmp/setup_superset.py
-
-# Or using the wrapper script:
-bash superset/setup_superset.sh
-```
-
-### Pre-Configured Dashboards
-
-1. **Real-time Fleet Tracking** (`/superset/dashboard/realtime-fleet-tracking/`):
-
-   * Configured with a 30-second auto-refresh interval.
-   * Geospatial Scatterplot displaying active vessels based on `v_active_fleet_state`.
-   * Live Active Vessels Roster and headline fleet count.
-
-2. **Speed Alerts & Safety Violations** (`/superset/dashboard/speed-alerts-safety-violations/`):
-
-   * Tabular audit log of vessels exceeding 20.0 knots.
-   * Breakdown of top speeding vessels by MMSI and maximum recorded speed.
-   * Total violation count metric.
-
-3. **Port Congestion & Operational Metrics** (`/superset/dashboard/port-congestion-operational-metrics/`):
-
-   * Port dwell distribution (average and maximum turnaround time per port).
-   * Speed profiles grouped by commercial vessel classification.
-   * High-density traffic route cells ranked by AIS ping frequency.
-
-4. **Vessel Behavior Clustering & Anomalies**:
-
-   * Vessel behavior clusters generated using Spark MLlib K-Means.
-   * Cluster distribution and vessel counts.
-   * Anomaly counts based on distance from cluster centroids.
-   * Spatial visualization of clustered and anomalous vessels.
-
-### Manual UI Configuration (Fallback)
-
-If manual dashboard creation is preferred:
-
-1. Navigate to **Data ➔ Databases ➔ + Database**:
-
-   * Connection: PostgreSQL
-   * URI: `postgresql+psycopg2://maritime:maritime@postgis:5432/maritime`
-   * Display Name: `Maritime PostGIS`
-
-2. Navigate to **Data ➔ Datasets ➔ + Dataset**:
-
-   * Add `v_active_fleet_state`
-   * Add `fleet_daily_kpis`
-   * Add `port_dwell_times`
-   * Add `route_density_grid`
-   * Add `vessel_speed_alerts`
-   * Add `vessel_behavior_clusters`
-
-3. Build charts using **Deck.gl Scatterplot** (using `lon` and `lat` columns) or standard **Table** / **ECharts Bar** views, and assemble them into dashboards.
-
----
-
-## 🧠 Layer 5: Analytics & AI — Spark MLlib K-Means
-
-Layer 5 delivers automated vector-based clustering and anomaly detection across daily historical AIS partitions, profiling vessel kinematic behaviors and identifying anomalous navigation patterns.
-
-### 1. Machine Learning Architecture
-
-The production ML pipeline uses **PySpark MLlib K-Means**.
-
-The Spark ML pipeline:
-
-1. Reads historical AIS Parquet partitions from HDFS.
-2. Extracts vessel behavior features such as:
-
-   * Speed Over Ground (SOG)
-   * Course Over Ground (COG)
-   * Heading
-   * Latitude
-   * Longitude
-3. Uses **VectorAssembler** to combine the selected features into a feature vector.
-4. Uses **StandardScaler** to normalize the feature vector.
-5. Trains a **K-Means clustering model** with `k=5`.
-6. Assigns each vessel to its nearest cluster.
-7. Calculates the Euclidean distance between each vessel and its assigned cluster centroid.
-8. Calculates cluster-specific 95th percentile thresholds.
-9. Flags vessels exceeding the corresponding threshold as potential anomalies.
-10. Persists the trained model artifacts to HDFS.
-11. Writes the clustering and anomaly results to PostGIS.
-
-### 2. K-Means Clustering
-
-**Algorithm:** K-Means Clustering
-**Framework:** PySpark MLlib
-**Learning Type:** Unsupervised Learning
-
-K-Means groups vessels according to similarities in their selected behavioral and movement features.
-
-The model uses:
-
-* `VectorAssembler`
-* `StandardScaler`
-* `pyspark.ml.clustering.KMeans`
-
-The number of clusters is configured as:
-
-```text
-k = 5
-```
-
-The model is trained against the distributed AIS dataset using the Spark cluster.
-
-### 3. Anomaly Detection
-
-Anomaly detection is performed using the vessel's distance from its assigned cluster centroid.
-
-For each cluster:
-
-```text
-Anomaly Threshold = 95th Percentile of Distance to Centroid
-```
-
-A vessel is marked as an anomaly when its distance exceeds the threshold for its assigned cluster.
-
-This provides a scalable approach to identifying unusual vessel behavior without requiring pre-labeled training data.
-
-### 4. Automated Execution
-
-#### Standalone Manual Execution
-
-```bash
-docker exec spark-master /spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0,org.postgresql:postgresql:42.6.0 \
-  --conf spark.sql.shuffle.partitions=8 \
-  --conf spark.executor.memory=2g \
-  --conf spark.driver.memory=1g \
-  /opt/spark-apps/mahout/spark_mahout_clustering.py --exec-date 2024-12-25 --k 5 --anomaly-threshold-pct 95
-```
-
-### 5. Airflow ML Pipeline
-
-The clustering job is integrated into the `maritime_batch_kpi_pipeline` DAG.
-
-The pipeline executes:
-
-```text
-check_hdfs_partition_exists
-    ->
-run_batch_kpi_job
-    ->
-run_spark_ml_clustering_job
-    ->
-verify_postgres_rows_written
-    ->
-pipeline_health_check
-```
-
-To trigger the pipeline for an archived date partition:
-
-```bash
-docker exec airflow-scheduler airflow dags trigger maritime_batch_kpi_pipeline -e 2024-12-28
-```
-
-### 6. Output Artifact Locations
-
-* **Trained Spark ML Model:** `hdfs://namenode:9000/models/vessel_clustering/date=YYYY-MM-DD/`
-* **PostGIS Analytical Serving Table:** `vessel_behavior_clusters`
-
----
-
-## 🗄️ PostGIS Database Schema & Idempotency
-
-Table DDL (`db/init/04_vessel_behavior_clusters.sql`):
-
-```sql
-CREATE TABLE IF NOT EXISTS vessel_behavior_clusters (
-    id BIGSERIAL PRIMARY KEY,
-    kpi_date DATE NOT NULL,
-    mmsi BIGINT NOT NULL,
-    cluster_id INTEGER NOT NULL,
-    lat NUMERIC,
-    lon NUMERIC,
-    sog_knots NUMERIC,
-    cog_degrees NUMERIC,
-    distance_to_centroid NUMERIC,
-    is_anomaly BOOLEAN NOT NULL DEFAULT FALSE,
-    geom GEOMETRY(Point, 4326),
-    model_run_ts TIMESTAMP NOT NULL,
-    UNIQUE (kpi_date, mmsi, model_run_ts)
-);
-```
-
-* **True Idempotency:** The Spark job performs an explicit `DELETE FROM vessel_behavior_clusters WHERE kpi_date = :exec_date` before appending rows. Re-running the pipeline on the same date will not duplicate rows even if `model_run_ts` changes across retries.
-* **Spatial Geometry:** Point geometries are populated using `ST_SetSRID(ST_MakePoint(lon, lat), 4326)` (longitude first) and indexed via GIST (`idx_vbc_geom`).
-
----
-
-## 📈 Machine Learning Demo SQL Queries
-
-### Query 1: Cluster Distribution & Anomaly Rate
-
-```sql
-docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    cluster_id,
-    COUNT(*) AS total_vessels,
-    SUM(CASE WHEN is_anomaly THEN 1 ELSE 0 END) AS anomaly_count,
-    ROUND(AVG(sog_knots), 2) AS avg_sog_knots,
-    ROUND(AVG(distance_to_centroid), 4) AS avg_distance
-FROM vessel_behavior_clusters
-WHERE kpi_date = '2024-12-25'
-GROUP BY cluster_id
-ORDER BY cluster_id;
-"
-```
-
-### Query 2: Top Anomalous Vessels
-
-```sql
-docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    mmsi,
-    cluster_id,
-    sog_knots,
-    cog_degrees,
-    ROUND(distance_to_centroid, 4) AS distance_to_centroid,
-    ST_AsText(geom) AS point_geometry
-FROM vessel_behavior_clusters
-WHERE kpi_date = '2024-12-25' AND is_anomaly = TRUE
-ORDER BY distance_to_centroid DESC
-LIMIT 5;
-"
-```
-
-### Query 3: Anomaly Verification Joined to Active Fleet State
-
-```sql
-docker compose exec postgis psql -U maritime -d maritime -c "
-SELECT
-    c.mmsi,
-    a.vessel_name,
-    c.cluster_id,
-    c.sog_knots AS cluster_sog,
-    c.distance_to_centroid,
-    c.is_anomaly
-FROM vessel_behavior_clusters c
-LEFT JOIN active_fleet_state a ON c.mmsi = a.mmsi
-WHERE c.kpi_date = '2024-12-25' AND c.is_anomaly = TRUE
-LIMIT 5;
-"
-```
+## What could scale next
+
+| Part | How it scales |
+|---|---|
+| Kafka | add partitions and brokers |
+| Spark | add executors |
+| HDFS | add DataNodes |
+| PostGIS | partition tables, or move to Citus |
